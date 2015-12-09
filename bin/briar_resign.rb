@@ -10,6 +10,8 @@ require 'briar/environment'
 require 'dotenv'
 require 'nokogiri-plist'
 
+system('brew update && brew install ldid') unless system('ldid')
+
 def msg(title, &block)
   puts "\n" + '-'*10 + title + '-'*10
   block.call
