@@ -8,11 +8,68 @@ require 'find'
 require 'open3'
 require 'briar/environment'
 require 'dotenv'
+require 'nokogiri-plist'
 
 def msg(title, &block)
   puts "\n" + '-'*10 + title + '-'*10
   block.call
   puts '-'*10 + '-------' + '-'*10 + "\n"
+end
+
+def getEntlistFromBinary(path)
+  output = []
+  xml_header_found = 0
+  Open3.popen3("ldid -e #{path}") do |_, stdout, stderr, wait_thr|
+    out = stdout.read.strip
+    err = stderr.read.strip
+    xml_header_found = xml_header_found + 1 if "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" == out
+    output << out if xml_header_found < 2
+    exit_status = wait_thr.value
+  end
+  return Nokogiri::PList(output.join("\n"))
+end
+
+def createEntList(ios_entitlements_path, plist_xml_content)
+  File.open(ios_entitlements_path, 'w+') do |file|
+    file.puts "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+    file.puts "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">"
+    file.puts "<plist version=\"1.0\">"
+    file.puts plist_xml_content
+    file.puts '</plist>'
+  end
+end
+
+def updateWildcard(original, wildcard)
+  bundles = original.split('.')
+
+  if bundles[0].length == 10 and bundles[0].hex > 0
+    bundles[0] = wildcard
+    original = bundles.join('.')
+  end
+
+  return original
+end
+
+def updateEntList(plist, wildcard, bundle_identifier)
+  if plist['application-identifier']
+    plist['application-identifier'] = updateWildcard(plist['application-identifier'], wildcard)
+  end
+
+  if plist['com.apple.developer.team-identifier']
+    plist['com.apple.developer.team-identifier'] = updateWildcard(plist['com.apple.developer.team-identifier'], wildcard)
+  end
+
+  if plist['keychain-access-groups']
+    new_keychains = []
+    plist['keychain-access-groups'].each do |keychain|
+      bundles = keychain.split('.')
+      new_keychains << updateWildcard(keychain, wildcard)
+    end
+
+    plist['keychain-access-groups'] = new_keychains
+  end
+
+  return plist
 end
 
 def briar_resign(args)
@@ -99,6 +156,7 @@ def resign_ipa(options)
   work_dir = 'resigned'
   ipa = File.join(work_dir, File.basename(options[:ipa]))
   mp = File.join(work_dir, File.basename(options[:provision]))
+  wildcard = options[:wildcard]
 
   puts 'INFO: making a directory to put the resigned ipa in'
   if File.exist? work_dir
@@ -180,11 +238,6 @@ def resign_ipa(options)
     exit 1
   end
 
-  Dir.glob("#{abs_app_path}/**/*.xcent").each do |existing_xcent|
-    puts "INFO: deleting the existing: '#{existing_xcent}'"
-    FileUtils.rm_rf(existing_xcent)
-  end
-
   plist = CFPropertyList::List.new(:file => info_plist_path)
   data = CFPropertyList.native_types(plist.value)
 
@@ -197,6 +250,13 @@ def resign_ipa(options)
   puts "INFO: parsed plist at '#{info_plist_path}'"
 
   bundle_identifier = options[:bundle_identifier] ? options[:bundle_identifier] : data['CFBundleIdentifier']
+
+  Dir.glob("#{abs_app_path}/**/*.xcent").each do |existing_xcent|
+    puts "INFO: Updating the existing: '#{existing_xcent}'"
+    plist = Nokogiri::PList(open(existing_xcent))
+    createEntList(existing_xcent, updateEntList(plist, wildcard, bundle_identifier))
+  end
+
   unless bundle_identifier
     msg 'error' do
       puts "Unable to find CFBundleIdentifier in plist '#{data}'"
@@ -213,8 +273,6 @@ def resign_ipa(options)
     plist.save(info_plist_path, CFPropertyList::List::FORMAT_XML)
   end
 
-
-
   bundle_exec = data['CFBundleExecutable']
 
   unless bundle_exec
@@ -230,25 +288,6 @@ def resign_ipa(options)
 
   puts "INFO: found appname '#{appname}'"
 
-  wildcard = options[:wildcard]
-  puts "INFO: creating new entitlements with '#{wildcard}'"
-  ios_entitlements_path = File.join(work_dir, 'new-entitlements.plist')
-  File.open(ios_entitlements_path, 'a+') do |file|
-    file.puts "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-    file.puts "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">"
-    file.puts "<plist version=\"1.0\">"
-    file.puts '<dict>'
-    file.puts '  <key>application-identifier</key>'
-    file.puts "    <string>#{wildcard}.#{bundle_identifier}</string>"
-    file.puts '  <key>keychain-access-groups</key>'
-    file.puts '    <array>'
-    file.puts "      <string>#{wildcard}.#{bundle_identifier}</string>"
-    file.puts '    </array>'
-    file.puts '  <key>get-task-allow</key>'
-    file.puts '    <true/>'
-    file.puts '</dict>'
-    file.puts '</plist>'
-  end
 
   Dir.glob("#{abs_app_path}/**/*").each do |file|
     unless File.directory?(file)
@@ -256,6 +295,16 @@ def resign_ipa(options)
       Open3.popen3(cmd) do |_, stderr, _, _|
         err = stderr.read.strip
         unless err[/is not an object file/,0]
+          puts "INFO: creating new entitlements with '#{wildcard}'"
+
+          ios_entitlements_path = File.join(work_dir, 'new-entitlements.plist')
+          plist = getEntlistFromBinary(file)
+          plist['get-task-allow'] = true
+          updated_plist = updateEntList(plist, wildcard, bundle_identifier)
+          createEntList( ios_entitlements_path,
+                         updated_plist.to_plist_xml(2)
+          )
+          
           sign_cmd = "xcrun codesign --verbose=4 --deep -f -s \"#{options[:id]}\" \"#{file}\" --entitlements \"#{ios_entitlements_path}\""
           puts "INFO: signing with '#{sign_cmd}'"
           Open3.popen3(sign_cmd) do |_, stdout, stderr, wait_thr|
@@ -309,5 +358,3 @@ def resign_ipa(options)
 
 
 end
-
-
