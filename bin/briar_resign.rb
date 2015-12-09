@@ -56,6 +56,11 @@ def updateWildcard(original, wildcard)
 end
 
 def updateEntList(plist, wildcard, bundle_identifier)
+  msg('INFO') do
+    puts "INFO: Original plist"
+    puts plist
+  end
+
   if plist['application-identifier']
     plist['application-identifier'] = updateWildcard(plist['application-identifier'], wildcard)
   end
@@ -67,11 +72,17 @@ def updateEntList(plist, wildcard, bundle_identifier)
   if plist['keychain-access-groups']
     new_keychains = []
     plist['keychain-access-groups'].each do |keychain|
-      bundles = keychain.split('.')
       new_keychains << updateWildcard(keychain, wildcard)
     end
 
     plist['keychain-access-groups'] = new_keychains
+  end
+
+  plist['get-task-allow'] = true
+
+  msg('INFO') do
+    puts "Updated plist"
+    puts plist
   end
 
   return plist
@@ -259,7 +270,9 @@ def resign_ipa(options)
   Dir.glob("#{abs_app_path}/**/*.xcent").each do |existing_xcent|
     puts "INFO: Updating the existing: '#{existing_xcent}'"
     plist = Nokogiri::PList(open(existing_xcent))
-    createEntList(existing_xcent, updateEntList(plist, wildcard, bundle_identifier))
+    updated_plist = updateEntList(plist, wildcard, bundle_identifier)
+    puts updated_plist.to_plist_xml(2)
+    createEntList(existing_xcent, updated_plist.to_plist_xml(2))
   end
 
   unless bundle_identifier
@@ -311,9 +324,8 @@ def resign_ipa(options)
           end
 
           updated_plist = updateEntList(plist, wildcard, bundle_identifier)
-          createEntList( ios_entitlements_path,
-                         updated_plist.to_plist_xml(2)
-          )
+          #puts updated_plist.to_plist_xml(2)
+          createEntList(ios_entitlements_path, updated_plist.to_plist_xml(2))
 
           sign_cmd = "xcrun codesign --verbose=4 --deep -f -s \"#{options[:id]}\" \"#{file}\" --entitlements \"#{ios_entitlements_path}\""
           puts "INFO: signing with '#{sign_cmd}'"
