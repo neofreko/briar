@@ -23,10 +23,15 @@ def getEntlistFromBinary(path)
     out = stdout.read.strip
     err = stderr.read.strip
     xml_header_found = xml_header_found + 1 if "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" == out
-    output << out if xml_header_found < 2
+    if xml_header_found < 2
+      output << out if out
+    end
     exit_status = wait_thr.value
   end
-  return Nokogiri::PList(output.join("\n"))
+  flat_output = output.join("\n")
+  flat_output.strip!
+  #puts "#{path}\n #{flat_output}"
+  return flat_output == ""? nil : Nokogiri::PList(flat_output)
 end
 
 def createEntList(ios_entitlements_path, plist_xml_content)
@@ -299,12 +304,17 @@ def resign_ipa(options)
 
           ios_entitlements_path = File.join(work_dir, 'new-entitlements.plist')
           plist = getEntlistFromBinary(file)
-          plist['get-task-allow'] = true
+          if plist != nil
+            plist['get-task-allow'] = true
+          else
+            plist = Nokogiri::PList({'get-task-allow' => true}.to_plist_xml)
+          end
+
           updated_plist = updateEntList(plist, wildcard, bundle_identifier)
           createEntList( ios_entitlements_path,
                          updated_plist.to_plist_xml(2)
           )
-          
+
           sign_cmd = "xcrun codesign --verbose=4 --deep -f -s \"#{options[:id]}\" \"#{file}\" --entitlements \"#{ios_entitlements_path}\""
           puts "INFO: signing with '#{sign_cmd}'"
           Open3.popen3(sign_cmd) do |_, stdout, stderr, wait_thr|
