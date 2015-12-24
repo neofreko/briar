@@ -41,6 +41,7 @@ Gem::Specification.new do |gem|
   gem.add_runtime_dependency 'xamarin-test-cloud', '~> 1.0'
   gem.add_runtime_dependency 'rake'
   gem.add_runtime_dependency 'nokogiri-plist'
+  gem.add_runtime_dependency 'trollop', '~> 2.1', '>= 2.1.2'
 
   gem.add_development_dependency 'travis', '~> 1.7'
   gem.add_development_dependency 'yard', '~> 0.8'

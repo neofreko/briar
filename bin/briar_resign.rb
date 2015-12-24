@@ -10,71 +10,67 @@ require 'briar/environment'
 require 'dotenv'
 require 'nokogiri-plist'
 
-system('brew update && brew install ldid') unless system('ldid')
-
 def msg(title, &block)
-  puts "\n" + '-'*10 + title + '-'*10
+  puts "\n" + '-' * 10 + title + '-' * 10
   block.call
-  puts '-'*10 + '-------' + '-'*10 + "\n"
+  puts '-' * 10 + '-------' + '-' * 10 + "\n"
 end
 
-def getEntlistFromBinary(path)
+def get_entlist_from_binary(path)
+  system('brew update && brew install ldid') unless system('which ldid 1&2> /dev/null')
   output = []
   xml_header_found = 0
-  Open3.popen3("ldid -e #{path}") do |_, stdout, stderr, wait_thr|
+  Open3.popen3("ldid -e '#{path}'") do |_, stdout, _stderr, _wait_thr|
     out = stdout.read.strip
-    err = stderr.read.strip
-    xml_header_found = xml_header_found + 1 if "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" == out
-    if xml_header_found < 2
-      output << out if out
-    end
-    exit_status = wait_thr.value
+    xml_header_found += 1 if "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" == out
+    output << out if xml_header_found < 2 && out
   end
   flat_output = output.join("\n")
   flat_output.strip!
-  #puts "#{path}\n #{flat_output}"
-  return flat_output == ""? nil : Nokogiri::PList(flat_output)
+  puts "#{path}\n #{flat_output}"
+  flat_output == '' ? nil : Nokogiri::PList(flat_output)
 end
 
-def createEntList(ios_entitlements_path, plist_xml_content)
+def create_entlist(ios_entitlements_path, plist_xml_content)
   File.open(ios_entitlements_path, 'w+') do |file|
-    file.puts "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-    file.puts "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">"
-    file.puts "<plist version=\"1.0\">"
+    file.puts '<?xml version="1.0" encoding="UTF-8"?>'
+    file.puts '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"' \
+              '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    file.puts '<plist version="1.0">'
     file.puts plist_xml_content
     file.puts '</plist>'
   end
 end
 
-def updateWildcard(original, wildcard)
+def update_wildcard(original, wildcard)
   bundles = original.split('.')
 
-  if bundles[0].length == 10 and bundles[0].hex > 0
+  if bundles[0].length == 10 && bundles[0].hex > 0
     bundles[0] = wildcard
     original = bundles.join('.')
   end
 
-  return original
+  original
 end
 
-def updateEntList(plist, wildcard, bundle_identifier)
+def update_entlist(plist, wildcard, entitlements_to_remove)
   msg('INFO') do
-    puts "INFO: Original plist"
+    puts 'INFO: Original plist'
     puts plist
   end
 
-  if plist['application-identifier']
-    plist['application-identifier'] = updateWildcard(plist['application-identifier'], wildcard)
-  end
+  plist['application-identifier'] = \
+    update_wildcard(plist['application-identifier'], wildcard) \
+    if plist['application-identifier']
 
-  if plist['com.apple.developer.team-identifier']
-    plist['com.apple.developer.team-identifier'] = updateWildcard(plist['com.apple.developer.team-identifier'], wildcard)
-  end
+  plist['com.apple.developer.team-identifier'] = \
+    update_wildcard(plist['com.apple.developer.team-identifier'], wildcard) \
+    if plist['com.apple.developer.team-identifier']
 
   if plist['keychain-access-groups']
     new_keychains = []
     plist['keychain-access-groups'].each do |keychain|
-      new_keychains << updateWildcard(keychain, wildcard)
+      new_keychains << update_wildcard(keychain, wildcard)
     end
 
     plist['keychain-access-groups'] = new_keychains
@@ -82,25 +78,24 @@ def updateEntList(plist, wildcard, bundle_identifier)
 
   plist['get-task-allow'] = true
 
+  # remove aps-environment from entitlements
+  # puts "entitlements_to_remove: #{entitlements_to_remove}"
+  plist.delete_if { |key, _value| entitlements_to_remove.include? key }
+
   msg('INFO') do
-    puts "Updated plist"
+    puts 'Updated plist'
     puts plist
   end
 
-  return plist
+  plist
 end
 
-def briar_resign(args)
+def briar_resign(opts)
   Dotenv.load
 
-  if args.length < 1
-    msg('Usage') do
-      puts 'briar resign /path/to/your.ipa {/path/to/your.mobileprovision | BRIAR_MOBILE_PROFILE} {team-identifier | BRIAR_TEAM_IDENTIFIER} {signing-identity | BRIAR_SIGNING_IDENTITY} [new-bundle-identifier]'
-    end
-    exit 1
-  end
+  puts "opts: #{opts}"
 
-  ipa = args[0]
+  ipa = opts[:ipa]
   unless ipa.end_with?('.ipa')
     msg('Error') do
       puts 'first arg must be an ipa'
@@ -115,7 +110,7 @@ def briar_resign(args)
     exit 1
   end
 
-  mobile_prov = args[1] || Briar::Environment.variable('BRIAR_MOBILE_PROFILE')
+  mobile_prov = opts[:profile]
   unless mobile_prov.end_with?('.mobileprovision')
     msg('Error') do
       puts 'second arg must be a path to a mobileprovision'
@@ -130,11 +125,7 @@ def briar_resign(args)
     exit 1
   end
 
-
-  wildcard = args[2] ||
-        Briar::Environment.variable('BRIAR_WILDCARD_IDENTIFIER') ||
-        Briar::Environment.variable('BRIAR_TEAM_IDENTIFIER') ||
-        Briar::Environment.variable('BRIAR_APP_PREFIX_IDENTIFIER') ||
+  wildcard = opts[:new_bundle_identifier]
 
   unless wildcard.length == 10
     msg 'error' do
@@ -150,24 +141,22 @@ def briar_resign(args)
     exit 1
   end
 
-  signing_id = args[3] || Briar::Environment.variable('BRIAR_SIGNING_IDENTITY')
+  signing_id = opts[:signing_identity]
   msg ('Info') do
     puts "will resign with identity '#{signing_id}'"
   end
 
-  options = {:ipa => ipa,
-             :provision => mobile_prov,
-             :id => signing_id,
-             :wildcard => wildcard}
+  options = { ipa: ipa,
+              provision: mobile_prov,
+              id: signing_id,
+              wildcard: wildcard,
+              entitlements_to_remove: (opts[:entitlements_to_remove] || '').split(/, /)
+            }
 
-  if args.length == 5
-    bundle_identifier = args[4]
-    puts "INFO: will resign with a new application id '#{bundle_identifier}'"
-    options[:bundle_identifier] = bundle_identifier
-  end
+  # TODO: display entitlements discrepancy between current app and provided
+  # mobileprovisioning profile
 
   resign_ipa(options)
-
 end
 
 def resign_ipa(options)
@@ -175,6 +164,9 @@ def resign_ipa(options)
   ipa = File.join(work_dir, File.basename(options[:ipa]))
   mp = File.join(work_dir, File.basename(options[:provision]))
   wildcard = options[:wildcard]
+  entitlements_to_remove = options[:entitlements_to_remove]
+
+  puts options
 
   puts 'INFO: making a directory to put the resigned ipa in'
   if File.exist? work_dir
@@ -230,7 +222,6 @@ def resign_ipa(options)
   abs_app_path = "#{payload_dir}/#{app_path}"
   puts "INFO: found app at '#{abs_app_path}'"
 
-
   info_plist = Dir.foreach(abs_app_path).find { |x| /^Info\.plist$/.match(x) }
 
   if info_plist.nil?
@@ -242,7 +233,6 @@ def resign_ipa(options)
 
   info_plist_path = "#{abs_app_path}/#{info_plist}"
   puts "INFO: found info plist at '#{info_plist_path}'"
-
 
   mp_id = File.basename(mp, '.mobileprovision')
   puts "INFO: found mobile provision id '#{mp_id}'"
@@ -256,10 +246,10 @@ def resign_ipa(options)
     exit 1
   end
 
-  plist = CFPropertyList::List.new(:file => info_plist_path)
+  plist = CFPropertyList::List.new(file: info_plist_path)
   data = CFPropertyList.native_types(plist.value)
 
-  if data.nil? or !data.is_a? Hash
+  if data.nil? || !data.is_a?(Hash)
     msg 'error' do
       puts "Unable to parse binary plist: #{info_plist_path}"
     end
@@ -272,9 +262,9 @@ def resign_ipa(options)
   Dir.glob("#{abs_app_path}/**/*.xcent").each do |existing_xcent|
     puts "INFO: Updating the existing: '#{existing_xcent}'"
     plist = Nokogiri::PList(open(existing_xcent))
-    updated_plist = updateEntList(plist, wildcard, bundle_identifier)
-    puts updated_plist.to_plist_xml(2)
-    createEntList(existing_xcent, updated_plist.to_plist_xml(2))
+    updated_plist = update_entlist(plist, wildcard, entitlements_to_remove)
+    puts "Updated *.xcent plist: #{updated_plist.to_plist_xml(2)}"
+    create_entlist(existing_xcent, updated_plist.to_plist_xml(2))
   end
 
   unless bundle_identifier
@@ -308,39 +298,44 @@ def resign_ipa(options)
 
   puts "INFO: found appname '#{appname}'"
 
-
   Dir.glob("#{abs_app_path}/**/*").each do |file|
-    unless File.directory?(file)
-      cmd = "xcrun otool -h \"#{file}\""
-      Open3.popen3(cmd) do |_, stderr, _, _|
-        err = stderr.read.strip
-        unless err[/is not an object file/,0]
-          puts "INFO: creating new entitlements with '#{wildcard}'"
+    next if File.directory?(file)
+    cmd = "xcrun otool -h \"#{file}\""
+    Open3.popen3(cmd) do |_, stderr, _, _|
+      err = stderr.read.strip
+      unless err[/is not an object file/, 0]
+        puts "INFO: creating new entitlements with '#{wildcard}'"
 
-          ios_entitlements_path = File.join(work_dir, 'new-entitlements.plist')
-          plist = getEntlistFromBinary(file)
-          if plist != nil
-            plist['get-task-allow'] = true
+        ios_entitlements_path = File.join(work_dir, "#{Time.now.to_f}-new-entitlements.plist")
+        plist = get_entlist_from_binary(file)
+        puts "original plist #{file}: #{plist}"
+        if !plist.nil?
+          plist['get-task-allow'] = true
+        else
+          plist = Nokogiri::PList({ 'get-task-allow' => true }.to_plist_xml)
+        end
+
+        updated_plist = update_entlist(plist, wildcard, entitlements_to_remove)
+        puts "updated plist #{file}: #{updated_plist.to_plist_xml(2)}"
+        create_entlist(ios_entitlements_path, updated_plist.to_plist_xml(2))
+
+        identifier = updated_plist['application-identifier']
+        identifier = " -i \"#{identifier}\" " if identifier
+
+        sign_cmd = 'xcrun codesign --verbose=4 --deep -f ' \
+                   "-s \"#{options[:id]}\" \"#{file}\"" \
+                   "#{identifier}" \
+                   " --entitlements \"#{ios_entitlements_path}\""
+        puts "INFO: signing with '#{sign_cmd}'"
+        Open3.popen3(sign_cmd) do |_, stdout, stderr, wait_thr|
+          out = stdout.read.strip
+          err = stderr.read.strip
+          puts out
+          exit_status = wait_thr.value
+          if exit_status == 0
           else
-            plist = Nokogiri::PList({'get-task-allow' => true}.to_plist_xml)
-          end
-
-          updated_plist = updateEntList(plist, wildcard, bundle_identifier)
-          #puts updated_plist.to_plist_xml(2)
-          createEntList(ios_entitlements_path, updated_plist.to_plist_xml(2))
-
-          sign_cmd = "xcrun codesign --verbose=4 --deep -f -s \"#{options[:id]}\" \"#{file}\" --entitlements \"#{ios_entitlements_path}\""
-          puts "INFO: signing with '#{sign_cmd}'"
-          Open3.popen3(sign_cmd) do |_, stdout, stderr, wait_thr|
-            out = stdout.read.strip
-            err = stderr.read.strip
-            puts out
-            exit_status = wait_thr.value
-            if exit_status == 0
-            else
-              puts err
-              exit 1
-            end
+            puts err
+            exit 1
           end
         end
       end
@@ -357,7 +352,6 @@ def resign_ipa(options)
   puts 'INFO: zipping up Payload'
 
   FileUtils.cd(work_dir) do
-
     if Dir.exist?(File.join(work_dir, 'SwiftSupport'))
       zip_input = 'Payload SwiftSupport'
     else
@@ -370,15 +364,9 @@ def resign_ipa(options)
       end
       exit 1
     end
-
   end
 
   puts "INFO: finished signing '#{ipa}'"
 
-
-  unless ENV['BRIAR_DONT_OPEN_ON_RESIGN']
-    system("open #{work_dir}")
-  end
-
-
+  system("open #{work_dir}") unless ENV['BRIAR_DONT_OPEN_ON_RESIGN']
 end

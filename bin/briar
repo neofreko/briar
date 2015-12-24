@@ -1,9 +1,10 @@
 #!/usr/bin/env ruby
-#http://tech.natemurray.com/2007/03/ruby-shell-commands.html
+# http://tech.natemurray.com/2007/03/ruby-shell-commands.html
 require 'find'
 require 'rainbow'
 require 'require_relative'
 require 'ansi/logger'
+require 'Trollop'
 
 @log = ANSI::Logger.new(STDOUT)
 
@@ -22,7 +23,6 @@ require_relative './briar_tags'
 
 num_args = ARGV.length
 
-
 def briar_version
   puts "#{Briar::VERSION}"
 end
@@ -32,84 +32,115 @@ if num_args == 0
   exit 0
 end
 
-if num_args == 1 and (ARGV[0] == 'help' or ARGV[0] == 'version')
+if num_args == 1 && (ARGV[0] == 'help' || ARGV[0] == 'version')
   command = ARGV[0]
   case command
-    when 'help'
-      print_usage
-    when 'version'
-      briar_version
-    else
-      @log.error{"'#{command}' is not defined"}
-      @log.error('can you try something else?')
-      exit 1
+  when 'help'
+    print_usage
+  when 'version'
+    briar_version
+  else
+    @log.error { "'#{command}' is not defined" }
+    @log.error('can you try something else?')
+    exit 1
   end
   exit 0
 end
 
-if num_args == 2 and ARGV[0] == 'help'
+if num_args == 2 && ARGV[0] == 'help'
   command = ARGV[1]
   case command
-    when 'console'
-      print_console_help
-    when 'cucumber-reports'
-      print_cucumber_reports_help
-    when 'install'
-      print_install_help
-    when 'resign'
-      print_resign_help
-    when 'report'
-      print_report_help
-    when 'rm'
-      print_rm_help
-    when 'sim'
-      print_sim_help
-    when 'tags'
-      print_tags_help
-    when 'version'
-      print_version_help
-    when '.xamarin'
-      print_dot_xamarin_help
-    when 'xtc'
-      print_xtc_help
-    when 'xtc-profiles'
-      print_xtc_profiles_help
-    else
-      @log.error("'#{command}' is not defined, so there is no help for you")
-      exit 1
+  when 'console'
+    print_console_help
+  when 'cucumber-reports'
+    print_cucumber_reports_help
+  when 'install'
+    print_install_help
+  when 'resign'
+    print_resign_help
+  when 'report'
+    print_report_help
+  when 'rm'
+    print_rm_help
+  when 'sim'
+    print_sim_help
+  when 'tags'
+    print_tags_help
+  when 'version'
+    print_version_help
+  when '.xamarin'
+    print_dot_xamarin_help
+  when 'xtc'
+    print_xtc_help
+  when 'xtc-profiles'
+    print_xtc_profiles_help
+  else
+    @log.error("'#{command}' is not defined, so there is no help for you")
+    exit 1
   end
   exit 0
 end
-
-
 
 command = ARGV[0]
 args = ARGV.drop(1)
 case command
-  when 'console'
-    briar_console(args)
-  when 'install'
-    briar_install(args)
-  when 'report'
-    briar_report(args)
-  when 'resign'
-    briar_resign(args)
-  when 'rm'
-    briar_rm(args)
-  when 'sim'
-    briar_sim(args)
-  when 'tags'
-    briar_tags(args)
-  when 'xtc'
-    briar_xtc(args)
+when 'console'
+  briar_console(args)
+when 'install'
+  briar_install(args)
+when 'report'
+  briar_report(args)
+when 'resign'
+  opts = Trollop.options do
+    banner 'briar resign /path/to/your.ipa {/path/to/your.mobileprovision' \
+         '| BRIAR_MOBILE_PROFILE} {team-identifier | BRIAR_TEAM_IDENTIFIER}' \
+         ' {signing-identity | BRIAR_SIGNING_IDENTITY} [new-bundle-identifier]'
+    opt :ipa, 'path to .ipa file', short: 'b', type: String, required: true
+    opt :profile, '/path/to/your.mobileprovision',
+        short: 'p',
+        type: String,
+        default: Briar::Environment.variable('BRIAR_MOBILE_PROFILE')
+    opt :team_identifier, 'team-identifier',
+        short: 't',
+        type: String,
+        default: Briar::Environment.variable('BRIAR_TEAM_IDENTIFIER')
+    opt :signing_identity, 'signing-identity',
+        short: 's',
+        type: String,
+        default: Briar::Environment.variable('BRIAR_SIGNING_IDENTITY')
+    opt :entitlements_to_remove, 'comma delimited entitlements key to remove',
+        short: 'r', type: String
+    opt :new_bundle_identifier,
+        'new-bundle-identifier',
+        short: 'n',
+        type: String,
+        default: false ||
+                 Briar::Environment.variable('BRIAR_WILDCARD_IDENTIFIER') ||
+                 Briar::Environment.variable('BRIAR_TEAM_IDENTIFIER') ||
+                 Briar::Environment.variable('BRIAR_APP_PREFIX_IDENTIFIER')
+  end
+  p opts
+  Trollop.die :ipa, 'must exist' unless File.exist?(opts[:ipa])
+  Trollop.die :profile, 'must exist' if opts[:profile] \
+                                        && !File.exist?(opts[:profile])
+
+  briar_resign(opts)
+when 'rm'
+  briar_rm(args)
+when 'sim'
+  briar_sim(args)
+when 'tags'
+  briar_tags(args)
+when 'xtc'
+  briar_xtc(args)
 
   # deprecated
-  when BRIAR_RM_CAL_TARGETS
-    puts Rainbow('DEPRECATED 0.1.3 - replaced with $ briar rm sim-targets').yellow
-    briar_rm(['sim-targets'])
-  else
-    @log.error{"'#{command}' is not defined"}
-    @log.error('can you try something else?')
-    exit 1
+when BRIAR_RM_CAL_TARGETS
+  puts Rainbow('DEPRECATED 0.1.3 - replaced with $ briar rm sim-targets').yellow
+  briar_rm(['sim-targets'])
+else
+  @log.error { "'#{command}' is not defined" }
+  @log.error('can you try something else?')
+  exit 1
 end
 exit 0
