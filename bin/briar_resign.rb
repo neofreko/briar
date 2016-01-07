@@ -45,7 +45,7 @@ end
 def update_wildcard(original, wildcard)
   bundles = original.split('.')
 
-  if bundles[0].length == 10 && bundles[0].hex > 0
+  if bundles[0].length == 10 # && bundles[0].hex > 0
     bundles[0] = wildcard
     original = bundles.join('.')
   end
