@@ -150,7 +150,7 @@ def briar_resign(opts)
               provision: mobile_prov,
               id: signing_id,
               wildcard: wildcard,
-              entitlements_to_remove: (opts[:entitlements_to_remove] || '').split(/, /)
+              entitlements_to_remove: opts[:entitlements_to_remove]
             }
 
   # TODO: display entitlements discrepancy between current app and provided

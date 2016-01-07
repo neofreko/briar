@@ -109,7 +109,8 @@ when 'resign'
         type: String,
         default: Briar::Environment.variable('BRIAR_SIGNING_IDENTITY')
     opt :entitlements_to_remove, 'comma delimited entitlements key to remove',
-        short: 'r', type: String
+        short: 'r', type: String,
+        multi: true
     opt :new_bundle_identifier,
         'new-bundle-identifier',
         short: 'n',
