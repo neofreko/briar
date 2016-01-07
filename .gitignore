@@ -29,3 +29,7 @@ __MACOSX
 # emacs turds
 (.*/)?\#[^/]*\#$
 
+resigned
+*.mobileprovision
+.env
+*.ipa
