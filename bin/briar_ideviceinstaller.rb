@@ -11,7 +11,7 @@ require 'retriable'
 module Briar
   module IDEVICEINSTALLER
 
-    include Calabash::Cucumber::Logging
+    #include Calabash::Cucumber::Logging
 
     def ideviceinstaller(device, cmd, opts={})
       default_opts = {:build_script => ENV['IPA_BUILD_SCRIPT'],
@@ -54,7 +54,7 @@ module Briar
             uninstall udid, bundle_id, bin_path
           end
         when :reinstall
-          _deprecated('1.1.0', ':reinstall arg has been deprecated; use :install instead', :warn)
+          #_deprecated('1.1.0', ':reinstall arg has been deprecated; use :install instead', :warn)
           ideviceinstaller device, :install
       end
     end
