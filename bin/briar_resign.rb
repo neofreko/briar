@@ -187,7 +187,7 @@ def resign_ipa(options)
   end
 
   puts "INFO: copying assets to '#{work_dir}'"
-  unless system("cp #{options[:ipa]} #{ipa}")
+  unless system("cp '#{options[:ipa]}' #{ipa}")
     msg 'Error' do
       puts "could not copy '#{options[:ipa]}' to '#{ipa}'"
     end
@@ -202,9 +202,9 @@ def resign_ipa(options)
   end
 
   puts "unzipping '#{ipa}'"
-  unless system("unzip -qq #{ipa} -d #{work_dir}")
+  unless system("unzip -qq '#{ipa}' -d #{work_dir}")
     msg ('Error') do
-      puts "could not unzip -qq #{ipa} to '#{work_dir}'"
+      puts "could not unzip -qq '#{ipa}' to '#{work_dir}'"
     end
     exit 1
   end
@@ -358,7 +358,7 @@ def resign_ipa(options)
       zip_input = 'Payload'
     end
 
-    unless system("zip -qr #{File.basename(options[:ipa])} #{zip_input}")
+    unless system("zip -qr '#{File.basename(options[:ipa])}' #{zip_input}")
       msg 'error' do
         puts "could not zip '#{File.basename(options[:ipa])}' from '#{zip_input}'"
       end
